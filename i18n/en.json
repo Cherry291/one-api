@@ -85,7 +85,7 @@
   "该令牌状态不可用": "The token status is not available",
   "该令牌已过期": "The token has expired",
   "该令牌额度已用尽": "The token quota has been used up",
-  "无效的令牌": "Invalid token",
+  "无效的令牌，如果确认密码无误，可以尝试清空密码提问触发一次真正的令牌失效再重新填入原密码，或者尝试ctrl+f5刷新之后重新输入密码(缓存问题目前还在排查问题所在。)": "Invalid token",
   "id 或 userId 为空！": "id or userId is empty!",
   "quota 不能为负数！": "quota cannot be negative!",
   "令牌额度不足": "Insufficient token quota",

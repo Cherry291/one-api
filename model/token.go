@@ -67,7 +67,7 @@ func ValidateUserToken(key string) (token *Token, err error) {
 		}()
 		return token, nil
 	}
-	return nil, errors.New("无效的令牌")
+	return nil, errors.New("无效的令牌，如果确认密码无误，可以尝试清空密码提问触发一次真正的令牌失效再重新填入原密码，或者尝试 ctrl+f5 刷新之后重新输入密码(缓存问题目前还在排查问题所在。)")
 }
 
 func GetTokenByIds(id int, userId int) (*Token, error) {
