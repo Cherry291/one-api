@@ -24,6 +24,7 @@ const (
 	RelayModeModerations
 	RelayModeImagesGenerations
 	RelayModeEdits
+	RelayModeAudio
 )
 
 // https://platform.openai.com/docs/api-reference/chat
@@ -40,6 +41,26 @@ type GeneralOpenAIRequest struct {
 	Input       any       `json:"input,omitempty"`
 	Instruction string    `json:"instruction,omitempty"`
 	Size        string    `json:"size,omitempty"`
+	Functions   any       `json:"functions,omitempty"`
+}
+
+func (r GeneralOpenAIRequest) ParseInput() []string {
+	if r.Input == nil {
+		return nil
+	}
+	var input []string
+	switch r.Input.(type) {
+	case string:
+		input = []string{r.Input.(string)}
+	case []any:
+		input = make([]string, 0, len(r.Input.([]any)))
+		for _, item := range r.Input.([]any) {
+			if str, ok := item.(string); ok {
+				input = append(input, str)
+			}
+		}
+	}
+	return input
 }
 
 type ChatRequest struct {
@@ -60,6 +81,10 @@ type ImageRequest struct {
 	Prompt string `json:"prompt"`
 	N      int    `json:"n"`
 	Size   string `json:"size"`
+}
+
+type AudioResponse struct {
+	Text string `json:"text,omitempty"`
 }
 
 type Usage struct {
@@ -124,7 +149,7 @@ type ChatCompletionsStreamResponseChoice struct {
 	Delta struct {
 		Content string `json:"content"`
 	} `json:"delta"`
-	FinishReason string `json:"finish_reason,omitempty"`
+	FinishReason *string `json:"finish_reason"`
 }
 
 type ChatCompletionsStreamResponse struct {
@@ -158,15 +183,20 @@ func Relay(c *gin.Context) {
 		relayMode = RelayModeImagesGenerations
 	} else if strings.HasPrefix(c.Request.URL.Path, "/v1/edits") {
 		relayMode = RelayModeEdits
+	} else if strings.HasPrefix(c.Request.URL.Path, "/v1/audio") {
+		relayMode = RelayModeAudio
 	}
 	var err *OpenAIErrorWithStatusCode
 	switch relayMode {
 	case RelayModeImagesGenerations:
 		err = relayImageHelper(c, relayMode)
+	case RelayModeAudio:
+		err = relayAudioHelper(c, relayMode)
 	default:
 		err = relayTextHelper(c, relayMode)
 	}
 	if err != nil {
+		requestId := c.GetString(common.RequestIdKey)
 		retryTimesStr := c.Query("retry")
 		retryTimes, _ := strconv.Atoi(retryTimesStr)
 		if retryTimesStr == "" {
@@ -176,16 +206,17 @@ func Relay(c *gin.Context) {
 			c.Redirect(http.StatusTemporaryRedirect, fmt.Sprintf("%s?retry=%d", c.Request.URL.Path, retryTimes-1))
 		} else {
 			if err.StatusCode == http.StatusTooManyRequests {
-				err.OpenAIError.Message = "当前分组负载已饱和，请稍后再试，或升级账户以提升服务质量。"
+				err.OpenAIError.Message = "当前分组上游负载已饱和，请稍后再试"
 			}
+			err.OpenAIError.Message = common.MessageWithRequestId(err.OpenAIError.Message, requestId)
 			c.JSON(err.StatusCode, gin.H{
 				"error": err.OpenAIError,
 			})
 		}
 		channelId := c.GetInt("channel_id")
-		common.SysError(fmt.Sprintf("relay error (channel #%d): %s", channelId, err.Message))
+		common.LogError(c.Request.Context(), fmt.Sprintf("relay error (channel #%d): %s", channelId, err.Message))
 		// https://platform.openai.com/docs/guides/error-codes/api-errors
-		if shouldDisableChannel(&err.OpenAIError) {
+		if shouldDisableChannel(&err.OpenAIError, err.StatusCode) {
 			channelId := c.GetInt("channel_id")
 			channelName := c.GetString("channel_name")
 			disableChannel(channelId, channelName, err.Message)
@@ -207,10 +238,10 @@ func RelayNotImplemented(c *gin.Context) {
 
 func RelayNotFound(c *gin.Context) {
 	err := OpenAIError{
-		Message: fmt.Sprintf("API not found: %s:%s", c.Request.Method, c.Request.URL.Path),
-		Type:    "one_api_error",
+		Message: fmt.Sprintf("Invalid URL (%s %s)", c.Request.Method, c.Request.URL.Path),
+		Type:    "invalid_request_error",
 		Param:   "",
-		Code:    "api_not_found",
+		Code:    "",
 	}
 	c.JSON(http.StatusNotFound, gin.H{
 		"error": err,
